@@ -8,6 +8,10 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
+# Get the absolute path of the installation directory
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "Installation directory: $INSTALL_DIR"
+
 clear
 echo -e "${BLUE}======================================================${NC}"
 echo -e "${BLUE}        Agentforce MCP Server - Setup Script        ${NC}"
@@ -56,7 +60,7 @@ if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" 
 fi
 
 # Create and activate virtual environment
-VENV_DIR=".venv"
+VENV_DIR="$INSTALL_DIR/.venv"
 echo -e "${YELLOW}Creating virtual environment in $VENV_DIR...${NC}"
 
 # Remove existing venv if it exists
@@ -94,7 +98,7 @@ fi
 
 # Install dependencies
 echo -e "${YELLOW}Installing required dependencies...${NC}"
-pip install -r requirements.txt
+pip install -r "$INSTALL_DIR/requirements.txt"
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to install dependencies. Please check the error message above and try again.${NC}"
     exit 1
@@ -102,10 +106,10 @@ fi
 echo -e "${GREEN}Dependencies installed successfully.${NC}"
 
 # Make the server script executable
-chmod +x agentforce_mcp_server.py
+chmod +x "$INSTALL_DIR/agentforce_mcp_server.py"
 
 # Check if .env file already exists
-if [ -f ".env" ]; then
+if [ -f "$INSTALL_DIR/.env" ]; then
     echo -e "${YELLOW}An .env file already exists.${NC}"
     read -p "Do you want to overwrite it? (y/n): " -n 1 -r
     echo
@@ -121,7 +125,7 @@ else
     echo -e "${YELLOW}Setting up your environment variables...${NC}"
 fi
 
-if [[ ! -f ".env" || $REPLY =~ ^[Yy]$ ]]; then
+if [[ ! -f "$INSTALL_DIR/.env" || $REPLY =~ ^[Yy]$ ]]; then
     # Get Salesforce credentials
     echo -e "${CYAN}Please enter your Salesforce credentials:${NC}"
     echo -e "${YELLOW}(Press Enter to skip any field and use empty value)${NC}"
@@ -133,7 +137,7 @@ if [[ ! -f ".env" || $REPLY =~ ^[Yy]$ ]]; then
     read -p "Salesforce Server URL (e.g., example.my.salesforce.com): " SERVER_URL
     
     # Create .env file
-    cat > .env << EOF
+    cat > "$INSTALL_DIR/.env" << EOF
 SALESFORCE_ORG_ID="${ORG_ID}"
 SALESFORCE_AGENT_ID="${AGENT_ID}"
 SALESFORCE_CLIENT_ID="${CLIENT_ID}"
@@ -153,7 +157,7 @@ if [[ $TEST_SETUP =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}Testing Agentforce connection...${NC}"
     echo -e "${YELLOW}This will attempt to authenticate and create a session.${NC}"
     
-    python test_agentforce.py
+    python "$INSTALL_DIR/test_agentforce.py"
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}Test failed. Please check your credentials and try again.${NC}"
@@ -161,6 +165,32 @@ if [[ $TEST_SETUP =~ ^[Yy]$ ]]; then
         echo -e "${GREEN}Test completed. Your setup is working!${NC}"
     fi
 fi
+
+# Determine the MCP configuration paths based on OS
+PYTHON_PATH="$VENV_DIR/bin/python"
+SERVER_SCRIPT="$INSTALL_DIR/agentforce_mcp_server.py"
+
+# For Windows, adjust paths
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+    # Convert paths to Windows format
+    PYTHON_PATH=$(echo "$PYTHON_PATH" | sed 's/\//\\/g')
+    SERVER_SCRIPT=$(echo "$SERVER_SCRIPT" | sed 's/\//\\/g')
+fi
+
+# Generate the Claude Desktop configuration JSON
+CONFIG_JSON=$(cat << EOF
+{
+  "mcpServers": {
+    "agentforce": {
+      "command": "$PYTHON_PATH",
+      "args": [
+        "$SERVER_SCRIPT"
+      ]
+    }
+  }
+}
+EOF
+)
 
 # Check if we want to start the server
 echo
@@ -171,8 +201,21 @@ if [[ $START_SERVER =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}Starting Agentforce MCP Server...${NC}"
     echo -e "${YELLOW}Press Ctrl+C to stop the server.${NC}"
     
-    python agentforce_mcp_server.py
+    python "$INSTALL_DIR/agentforce_mcp_server.py"
 else
+    # Determine OS-specific config path
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        CONFIG_PATH="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+        CONFIG_DIR="$HOME/Library/Application Support/Claude"
+    elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+        CONFIG_PATH="$APPDATA\\Claude\\claude_desktop_config.json"
+        CONFIG_DIR="$APPDATA\\Claude"
+    else
+        # Linux or other
+        CONFIG_PATH="$HOME/.config/Claude/claude_desktop_config.json"
+        CONFIG_DIR="$HOME/.config/Claude"
+    fi
+    
     # Provide instructions for setting up Claude Desktop
     echo -e "${BLUE}======================================================${NC}"
     echo -e "${BLUE}          Claude Desktop Configuration Guide           ${NC}"
@@ -186,26 +229,50 @@ else
     echo
     echo -e "2. Add the following to your configuration:"
     echo
-    echo -e "${YELLOW}```json"
-    echo -e "{"
-    echo -e "  \"mcpServers\": {"
-    echo -e "    \"agentforce\": {"
-    echo -e "      \"command\": \"$(pwd)/$VENV_DIR/bin/python\","
-    echo -e "      \"args\": ["
-    echo -e "        \"$(pwd)/agentforce_mcp_server.py\""
-    echo -e "      ]"
-    echo -e "    }"
-    echo -e "  }"
-    echo -e "}"
-    echo -e "```${NC}"
+    echo -e "${YELLOW}"
+    echo "$CONFIG_JSON" | jq .
+    echo -e "${NC}"
     echo
+    
+    # Ask if user wants to automatically update the config
+    read -p "Do you want to automatically update your Claude Desktop configuration? (y/n): " -n 1 -r AUTO_CONFIG
+    echo
+    
+    if [[ $AUTO_CONFIG =~ ^[Yy]$ ]]; then
+        # Create config directory if it doesn't exist
+        mkdir -p "$CONFIG_DIR"
+        
+        # Check if config file exists
+        if [ -f "$CONFIG_PATH" ]; then
+            # Backup existing config
+            cp "$CONFIG_PATH" "${CONFIG_PATH}.backup"
+            echo -e "${YELLOW}Existing config backed up to ${CONFIG_PATH}.backup${NC}"
+            
+            # Update existing config
+            if command -v jq &> /dev/null; then
+                # Use jq to merge configs if available
+                jq -s '.[0] * .[1]' "$CONFIG_PATH" <(echo "$CONFIG_JSON") > "${CONFIG_PATH}.tmp"
+                mv "${CONFIG_PATH}.tmp" "$CONFIG_PATH"
+            else
+                # Simple replacement if jq is not available
+                echo "$CONFIG_JSON" > "$CONFIG_PATH"
+            fi
+        else
+            # Create new config file
+            echo "$CONFIG_JSON" > "$CONFIG_PATH"
+        fi
+        
+        echo -e "${GREEN}Claude Desktop configuration updated successfully.${NC}"
+        echo -e "${YELLOW}Please restart Claude Desktop to apply the changes.${NC}"
+    fi
+    
     echo -e "3. Restart Claude Desktop"
     echo
     echo -e "4. Start a conversation with Claude and look for the hammer icon in the input box"
     echo -e "   This indicates that MCP tools are available."
     echo
     echo -e "${GREEN}You can start the server at any time by running:${NC}"
-    echo -e "${YELLOW}source .venv/bin/activate && python agentforce_mcp_server.py${NC}"
+    echo -e "${YELLOW}cd $INSTALL_DIR && source .venv/bin/activate && python agentforce_mcp_server.py${NC}"
     echo
     echo -e "${BLUE}======================================================${NC}"
 fi
