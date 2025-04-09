@@ -4,7 +4,22 @@ This MCP server provides tools to interact with the Salesforce Agentforce API. I
 
 ## Getting Started After Cloning
 
-If you've just cloned this repository, follow these steps to set up and run the Agentforce MCP Server:
+If you've just cloned this repository, you can use the interactive setup script to quickly configure and run the server:
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+The setup script will:
+1. Check your Python version
+2. Install required dependencies
+3. Guide you through entering your Salesforce credentials
+4. Test your connection to Salesforce
+5. Offer to start the server
+6. Provide instructions for configuring Claude Desktop
+
+Alternatively, you can follow these manual steps:
 
 1. **Install dependencies**:
    ```bash
@@ -242,3 +257,24 @@ python test_agentforce.py
 ```
 
 This will attempt to authenticate, create a session, and exchange messages with your Agentforce agent.
+
+## Contributing and GitHub Push
+
+This repository includes a helpful script that simplifies the process of pushing your changes to GitHub:
+
+```bash
+chmod +x github_push.sh
+./github_push.sh
+```
+
+The `github_push.sh` script will:
+
+1. Check if git is installed on your system
+2. Verify that sensitive files like `.env` won't be pushed (they're in `.gitignore`)
+3. Prompt you for your GitHub repository URL
+4. Initialize a git repository if needed, or update the remote URL
+5. Add all files and display them for your review
+6. Commit the changes with a descriptive message
+7. Push the changes to GitHub
+
+This makes it easy to share your customizations or contribute back to the project while ensuring that sensitive information stays secure.
